@@ -1,165 +1,422 @@
--- Virprix Hub [V2]
--- Supported: Rivals, MM2, Steal an Egg, Flick, Slap Battle
+-- WizardLib.lua (v1.1 — slide fix)
+-- Host this raw, loadstring it
 
-local ProxyLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/ProxyHubDev/ProxyLib/refs/heads/main/Documents/ProxyLibrary"))()
-local Lib = ProxyLib.new()
+local WizardLib = {}
+WizardLib.__index = WizardLib
 
-local Players          = game:GetService("Players")
-local RunService       = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
 local TweenService     = game:GetService("TweenService")
-local ProximityPromptService = game:GetService("ProximityPromptService")
-local LocalPlayer      = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
 
--- ─── Game Detection ────────────────────────────────────────────────────────────
-local GAME_IDS = {
-    RIVALS      = 17625359962,
-    MM2         = 142823291,
-    STEAL_EGG   = 107778070777162,
-    FLICK       = 136801880565837,
-    SLAP_BATTLE = 6403373529,
+local COLORS = {
+    bg       = Color3.fromRGB(34, 34, 34),
+    titlebar = Color3.fromRGB(42, 42, 42),
+    control  = Color3.fromRGB(58, 58, 58),
+    border   = Color3.fromRGB(60, 60, 60),
+    togon    = Color3.fromRGB(85, 85, 85),
+    text     = Color3.fromRGB(255, 255, 255),
+    muted    = Color3.fromRGB(170, 170, 170),
+    label    = Color3.fromRGB(120, 120, 120),
 }
 
-local function getGame()
-    local id = game.PlaceId
-    for name, gid in pairs(GAME_IDS) do
-        if id == gid then return name end
+local TWEEN_OPEN  = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+local TWEEN_CLOSE = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+
+local function makeTween(obj, props, info)
+    return TweenService:Create(obj, info or TWEEN_OPEN, props)
+end
+
+local function corner(parent, radius)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, radius or 5)
+    c.Parent = parent
+end
+
+local function stroke(parent, color)
+    local s = Instance.new("UIStroke")
+    s.Color = color or COLORS.border
+    s.Thickness = 1
+    s.Parent = parent
+end
+
+local function makeLabel(parent, text, size, color, pos)
+    local l = Instance.new("TextLabel")
+    l.BackgroundTransparency = 1
+    l.Text = text
+    l.TextColor3 = color or COLORS.text
+    l.TextSize = size or 12
+    l.Font = Enum.Font.GothamMedium
+    l.Position = pos or UDim2.new(0, 0, 0, 0)
+    l.Size = UDim2.new(1, 0, 1, 0)
+    l.TextXAlignment = Enum.TextXAlignment.Left
+    l.Parent = parent
+    return l
+end
+
+function WizardLib.new(scriptName)
+    local self = setmetatable({}, WizardLib)
+    self._open = true
+    self._contentHeight = 0
+
+    -- ScreenGui
+    local sg = Instance.new("ScreenGui")
+    sg.Name = "WizardLib"
+    sg.ResetOnSpawn = false
+    sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+    sg.IgnoreGuiInset = true
+    sg.Parent = game:GetService("CoreGui")
+
+    -- Outer wrapper — only ever as tall as titlebar + clip frame
+    -- Does NOT resize on open/close; children handle their own size
+    local wrapper = Instance.new("Frame")
+    wrapper.Name = "Wrapper"
+    wrapper.BackgroundTransparency = 1
+    wrapper.BorderSizePixel = 0
+    wrapper.Position = UDim2.new(0, 80, 0, 80)
+    wrapper.Size = UDim2.new(0, 220, 0, 28) -- titlebar only; clip adds below
+    wrapper.Parent = sg
+    self._wrapper = wrapper
+
+    -- Titlebar panel (fixed height, always visible)
+    local tb = Instance.new("Frame")
+    tb.Name = "Titlebar"
+    tb.BackgroundColor3 = COLORS.titlebar
+    tb.BorderSizePixel = 0
+    tb.Size = UDim2.new(1, 0, 0, 28)
+    tb.ZIndex = 2
+    corner(tb, 5)
+    stroke(tb)
+    tb.Parent = wrapper
+    self._titlebar = tb
+
+    local title = Instance.new("TextLabel")
+    title.BackgroundTransparency = 1
+    title.Text = scriptName or "Script"
+    title.TextColor3 = COLORS.text
+    title.TextSize = 12
+    title.Font = Enum.Font.GothamBold
+    title.Position = UDim2.new(0, 10, 0, 0)
+    title.Size = UDim2.new(1, -40, 1, 0)
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.Parent = tb
+
+    local toggleBtn = Instance.new("TextButton")
+    toggleBtn.Name = "ToggleBtn"
+    toggleBtn.BackgroundColor3 = COLORS.control
+    toggleBtn.BorderSizePixel = 0
+    toggleBtn.Position = UDim2.new(1, -26, 0.5, -11)
+    toggleBtn.Size = UDim2.new(0, 22, 0, 22)
+    toggleBtn.Text = "-"
+    toggleBtn.TextColor3 = COLORS.text
+    toggleBtn.TextSize = 14
+    toggleBtn.Font = Enum.Font.GothamBold
+    toggleBtn.ZIndex = 3
+    corner(toggleBtn, 4)
+    toggleBtn.Parent = tb
+    self._toggleBtn = toggleBtn
+
+    -- Clip frame — sits below titlebar, clips the sliding content
+    -- Only this frame changes height on open/close
+    local clip = Instance.new("Frame")
+    clip.Name = "Clip"
+    clip.BackgroundColor3 = COLORS.bg
+    clip.BorderSizePixel = 0
+    clip.Position = UDim2.new(0, 0, 0, 28)
+    clip.Size = UDim2.new(1, 0, 0, 0) -- starts closed
+    clip.ClipsDescendants = true
+    corner(clip, 5)
+    stroke(clip)
+    clip.Parent = wrapper
+    self._clip = clip
+
+    -- Content frame inside clip — full height, slides up/down via Position
+    local content = Instance.new("Frame")
+    content.Name = "Content"
+    content.BackgroundTransparency = 1
+    content.BorderSizePixel = 0
+    content.Position = UDim2.new(0, 0, 0, 0)
+    content.Size = UDim2.new(1, 0, 0, 0) -- auto-sized by layout
+    content.Parent = clip
+    self._content = content
+
+    local listLayout = Instance.new("UIListLayout")
+    listLayout.Padding = UDim.new(0, 3)
+    listLayout.FillDirection = Enum.FillDirection.Vertical
+    listLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    listLayout.Parent = content
+    self._listLayout = listLayout
+
+    local padding = Instance.new("UIPadding")
+    padding.PaddingLeft   = UDim.new(0, 8)
+    padding.PaddingRight  = UDim.new(0, 8)
+    padding.PaddingTop    = UDim.new(0, 6)
+    padding.PaddingBottom = UDim.new(0, 6)
+    padding.Parent = content
+
+    -- Track content height; update content frame size and clip when open
+    listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        local h = listLayout.AbsoluteContentSize.Y + 16
+        self._contentHeight = h
+        content.Size = UDim2.new(1, 0, 0, h)
+        if self._open then
+            clip.Size = UDim2.new(1, 0, 0, h)
+            wrapper.Size = UDim2.new(0, 220, 0, 28 + h)
+        end
+    end)
+
+    -- Open/close: tween clip height only; titlebar never changes
+    toggleBtn.MouseButton1Click:Connect(function()
+        self:Toggle()
+    end)
+
+    self:_setupDrag()
+
+    -- Open on init with slide-down
+    self._open = false
+    self:Toggle()
+
+    return self
+end
+
+function WizardLib:Toggle()
+    self._open = not self._open
+    local h = self._contentHeight
+
+    if self._open then
+        self._toggleBtn.Text = "-"
+        -- Slide down: expand clip from 0 to full height
+        self._clip.Size = UDim2.new(1, 0, 0, 0)
+        self._wrapper.Size = UDim2.new(0, 220, 0, 28)
+        makeTween(self._clip, { Size = UDim2.new(1, 0, 0, h) }, TWEEN_OPEN):Play()
+        makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28 + h) }, TWEEN_OPEN):Play()
+    else
+        self._toggleBtn.Text = ">"
+        -- Slide up: collapse clip to 0
+        makeTween(self._clip, { Size = UDim2.new(1, 0, 0, 0) }, TWEEN_CLOSE):Play()
+        makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28) }, TWEEN_CLOSE):Play()
     end
-    return "UNKNOWN"
 end
 
-local CURRENT_GAME = getGame()
+function WizardLib:_setupDrag()
+    local wrapper  = self._wrapper
+    local titlebar = self._titlebar
+    local dragging, dragInput, dragStart, startPos
 
--- ─── Window ────────────────────────────────────────────────────────────────────
-local Window = Lib:CreateWindow({
-    Title    = "Virprix Hub",
-    Subtitle = "V2",
-    Size     = Vector2.new(560, 400),
-    Theme    = "Blue",
-    TypeUI   = "Modern",
-    AutoSave = true,
-    AutoLoad = true,
-    TitleConfig = {
-        Gradient = true,
-        Colors   = { Color3.fromRGB(80, 180, 255), Color3.fromRGB(30, 90, 255) },
-        Words    = {
-            "Virprix",
-            {
-                Text   = "Hub",
-                Colors = { Color3.fromRGB(180, 80, 255), Color3.fromRGB(80, 30, 255) },
-            },
-        },
-    },
-    ConfigPanel = {
-        Enabled    = true,
-        Theme      = true,
-        Fps        = true,
-        Ping       = true,
-        Profile    = true,
-        Acrylic    = true,
-        Language   = true,
-        HideNotify = true,
-    },
-    Acrylic     = { Enabled = true, Opacity = 0.6 },
-    FloatButton = { Shape = "Circle", Color = "Black", Size = 50 },
-})
+    local function update(input)
+        local delta = input.Position - dragStart
+        wrapper.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
 
--- ─── Home Tab ─────────────────────────────────────────────────────────────────
-Window:CreateSeparator({ Text = "HOME" })
-local HomeTab = Window:CreateTab({ Title = "Home" })
+    titlebar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = input.Position
+            startPos  = wrapper.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
 
-HomeTab:CreateSection({ Text = "Info" })
-HomeTab:CreateParagraph({
-    Title       = "Virprix Hub [V2]",
-    Description = "Detected game: " .. CURRENT_GAME .. (CURRENT_GAME == "UNKNOWN" and " — no features loaded." or " — features loaded below."),
-    ColoredWords = {
-        { Text = CURRENT_GAME, Colors = { Color3.fromRGB(80, 200, 255) } },
-    },
-})
+    titlebar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
 
--- ══════════════════════════════════════════════════════════════════════════════
--- ─── RIVALS ───────────────────────────────────────────────────────────────────
--- ══════════════════════════════════════════════════════════════════════════════
-if CURRENT_GAME == "RIVALS" then
-    Window:CreateSeparator({ Text = "RIVALS" })
-    local RivalsTab = Window:CreateTab({ Title = "Rivals" })
-
-    RivalsTab:CreateSection({ Text = "Script" })
-    RivalsTab:CreateButton({
-        Title       = "Load Rivals Script",
-        Description = "Executes the Rivals loadstring from ObfuscatorHub.",
-        Callback    = function()
-            loadstring(game:HttpGet("https://obfuscatorhub.vercel.app/api/69nyf1bx"))()
-        end,
-    })
-
--- ══════════════════════════════════════════════════════════════════════════════
--- ─── FLICK ────────────────────────────────────────────────────────────────────
--- ══════════════════════════════════════════════════════════════════════════════
-elseif CURRENT_GAME == "FLICK" then
-    Window:CreateSeparator({ Text = "FLICK" })
-    local FlickTab = Window:CreateTab({ Title = "Flick" })
-
-    FlickTab:CreateSection({ Text = "Script" })
-    FlickTab:CreateButton({
-        Title       = "Load Flick Script",
-        Description = "Executes the Flick loadstring from Pastebin.",
-        Callback    = function()
-            loadstring(game:HttpGet("https://pastebin.com/raw/sddQDeie"))()
-        end,
-    })
-
--- ══════════════════════════════════════════════════════════════════════════════
--- ─── MM2 ──────────────────────────────────────────────────────────────────────
--- ══════════════════════════════════════════════════════════════════════════════
-elseif CURRENT_GAME == "MM2" then
-    Window:CreateSeparator({ Text = "MM2" })
-    local MM2Tab = Window:CreateTab({ Title = "MM2" })
-
-    MM2Tab:CreateSection({ Text = "Script" })
-    MM2Tab:CreateButton({
-        Title       = "Load MM2 Script",
-        Description = "Executes the MM2 script.",
-        Callback    = function()
-            loadstring(game:HttpGet("Test.example/raw"))()
-        end,
-    })
-
--- ══════════════════════════════════════════════════════════════════════════════
--- ─── SLAP BATTLE ──────────────────────────────────────────────────────────────
--- ══════════════════════════════════════════════════════════════════════════════
-elseif CURRENT_GAME == "SLAP_BATTLE" then
-    Window:CreateSeparator({ Text = "SLAP BATTLE" })
-    local SlapTab = Window:CreateTab({ Title = "Slap Battle" })
-
-    SlapTab:CreateSection({ Text = "Script" })
-    SlapTab:CreateButton({
-        Title       = "Load Slap Battle Script",
-        Description = "Executes the Slap Battle loadstring from ObfuscatorHub.",
-        Callback    = function()
-            loadstring(game:HttpGet("https://obfuscatorhub.vercel.app/api/le2mh2Km"))()
-        end,
-    })
-
--- ══════════════════════════════════════════════════════════════════════════════
--- ─── STEAL AN EGG ─────────────────────────────────────────────────────────────
--- ══════════════════════════════════════════════════════════════════════════════
-elseif CURRENT_GAME == "STEAL_EGG" then
-    loadstring(game:HttpGet("https://pastefy.app/EI3Lv54O/raw"))()
-
--- ══════════════════════════════════════════════════════════════════════════════
--- ─── UNKNOWN ──────────────────────────────────────────────────────────────────
--- ══════════════════════════════════════════════════════════════════════════════
-else
-    HomeTab:CreateParagraph({
-        Title       = "Unsupported Game",
-        Description = "This game is not in the supported list. No features loaded.",
-    })
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then update(input) end
+    end)
 end
 
--- ─── Welcome Notify ───────────────────────────────────────────────────────────
-Window:Notify({
-    Title       = "Virprix Hub [V2]",
-    Description = "Loaded for: " .. CURRENT_GAME,
-    Duration    = 5,
-})
+function WizardLib:_row(height)
+    local row = Instance.new("Frame")
+    row.BackgroundTransparency = 1
+    row.BorderSizePixel = 0
+    row.Size = UDim2.new(1, 0, 0, height or 24)
+    row.Parent = self._content
+    return row
+end
+
+function WizardLib:Label(text)
+    local row = self:_row(18)
+    local l = makeLabel(row, text, 10, COLORS.label)
+    l.Font = Enum.Font.GothamBold
+    return self
+end
+
+function WizardLib:Text(text)
+    local row = self:_row(20)
+    local l = makeLabel(row, text, 11, COLORS.muted)
+    l.TextWrapped = true
+    return self
+end
+
+function WizardLib:Toggle(name, default, callback)
+    local state = default or false
+    local row = self:_row(24)
+    makeLabel(row, name, 11, COLORS.text)
+
+    local btn = Instance.new("TextButton")
+    btn.BackgroundColor3 = state and COLORS.togon or COLORS.control
+    btn.BorderSizePixel = 0
+    btn.Position = UDim2.new(1, -34, 0.5, -8)
+    btn.Size = UDim2.new(0, 30, 0, 16)
+    btn.Text = ""
+    corner(btn, 8)
+    stroke(btn)
+    btn.Parent = row
+
+    local knob = Instance.new("Frame")
+    knob.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    knob.BorderSizePixel = 0
+    knob.Position = UDim2.new(0, state and 15 or 2, 0.5, -6)
+    knob.Size = UDim2.new(0, 12, 0, 12)
+    corner(knob, 6)
+    knob.Parent = btn
+
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        makeTween(btn,  { BackgroundColor3 = state and COLORS.togon or COLORS.control }):Play()
+        makeTween(knob, { Position = UDim2.new(0, state and 15 or 2, 0.5, -6) }):Play()
+        if callback then callback(state) end
+    end)
+    return self
+end
+
+function WizardLib:Slider(name, min, max, default, callback)
+    local val = default or min
+    local row = self:_row(34)
+
+    local nameL = makeLabel(row, name, 11, COLORS.text)
+    nameL.Size = UDim2.new(0.6, 0, 0, 14)
+
+    local valL = Instance.new("TextLabel")
+    valL.BackgroundTransparency = 1
+    valL.Text = tostring(val)
+    valL.TextColor3 = COLORS.muted
+    valL.TextSize = 10
+    valL.Font = Enum.Font.Gotham
+    valL.Position = UDim2.new(0.6, 0, 0, 0)
+    valL.Size = UDim2.new(0.4, 0, 0, 14)
+    valL.TextXAlignment = Enum.TextXAlignment.Right
+    valL.Parent = row
+
+    local track = Instance.new("Frame")
+    track.BackgroundColor3 = COLORS.control
+    track.BorderSizePixel = 0
+    track.Position = UDim2.new(0, 0, 0, 18)
+    track.Size = UDim2.new(1, 0, 0, 4)
+    corner(track, 2)
+    track.Parent = row
+
+    local fill = Instance.new("Frame")
+    fill.BackgroundColor3 = Color3.fromRGB(140, 140, 140)
+    fill.BorderSizePixel = 0
+    fill.Size = UDim2.new((val - min) / (max - min), 0, 1, 0)
+    corner(fill, 2)
+    fill.Parent = track
+
+    local knob = Instance.new("TextButton")
+    knob.BackgroundColor3 = Color3.fromRGB(170, 170, 170)
+    knob.BorderSizePixel = 0
+    knob.Text = ""
+    knob.Size = UDim2.new(0, 14, 0, 14)
+    knob.Position = UDim2.new((val - min) / (max - min), -7, 0.5, -7)
+    corner(knob, 7)
+    knob.Parent = track
+
+    local sliding = false
+
+    local function setVal(input)
+        local rel = math.clamp(
+            (input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1
+        )
+        val = math.floor(min + (max - min) * rel)
+        valL.Text = tostring(val)
+        fill.Size = UDim2.new(rel, 0, 1, 0)
+        knob.Position = UDim2.new(rel, -7, 0.5, -7)
+        if callback then callback(val) end
+    end
+
+    knob.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = true
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if sliding and (
+            input.UserInputType == Enum.UserInputType.MouseMovement or
+            input.UserInputType == Enum.UserInputType.Touch
+        ) then setVal(input) end
+    end)
+
+    UserInputService.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            sliding = false
+        end
+    end)
+
+    track.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            setVal(input)
+        end
+    end)
+
+    return self
+end
+
+function WizardLib:TextBox(name, placeholder, callback)
+    local row = self:_row(44)
+
+    local nameL = makeLabel(row, name, 11, COLORS.text)
+    nameL.Size = UDim2.new(1, 0, 0, 14)
+
+    local box = Instance.new("TextBox")
+    box.BackgroundColor3 = Color3.fromRGB(42, 42, 42)
+    box.BorderSizePixel = 0
+    box.PlaceholderText = placeholder or "Enter value..."
+    box.PlaceholderColor3 = Color3.fromRGB(80, 80, 80)
+    box.Text = ""
+    box.TextColor3 = COLORS.text
+    box.TextSize = 11
+    box.Font = Enum.Font.Gotham
+    box.Position = UDim2.new(0, 0, 0, 18)
+    box.Size = UDim2.new(1, 0, 0, 22)
+    box.ClearTextOnFocus = false
+    corner(box, 4)
+    stroke(box)
+    box.Parent = row
+
+    local pad = Instance.new("UIPadding")
+    pad.PaddingLeft = UDim.new(0, 6)
+    pad.Parent = box
+
+    box.FocusLost:Connect(function(enter)
+        if callback then callback(box.Text, enter) end
+    end)
+    return self
+end
+
+function WizardLib:Divider()
+    local row = self:_row(10)
+    local line = Instance.new("Frame")
+    line.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
+    line.BorderSizePixel = 0
+    line.Position = UDim2.new(0, 0, 0.5, 0)
+    line.Size = UDim2.new(1, 0, 0, 1)
+    line.Parent = row
+    return self
+end
+
+return WizardLib
