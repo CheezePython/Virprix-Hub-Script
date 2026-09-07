@@ -1,5 +1,4 @@
--- WizardLib.lua (v1.1 — slide fix)
--- Host this raw, loadstring it
+-- WizardLib.lua (v1.2 — opens correctly)
 
 local WizardLib = {}
 WizardLib.__index = WizardLib
@@ -57,7 +56,6 @@ function WizardLib.new(scriptName)
     self._open = true
     self._contentHeight = 0
 
-    -- ScreenGui
     local sg = Instance.new("ScreenGui")
     sg.Name = "WizardLib"
     sg.ResetOnSpawn = false
@@ -65,18 +63,15 @@ function WizardLib.new(scriptName)
     sg.IgnoreGuiInset = true
     sg.Parent = game:GetService("CoreGui")
 
-    -- Outer wrapper — only ever as tall as titlebar + clip frame
-    -- Does NOT resize on open/close; children handle their own size
     local wrapper = Instance.new("Frame")
     wrapper.Name = "Wrapper"
     wrapper.BackgroundTransparency = 1
     wrapper.BorderSizePixel = 0
     wrapper.Position = UDim2.new(0, 80, 0, 80)
-    wrapper.Size = UDim2.new(0, 220, 0, 28) -- titlebar only; clip adds below
+    wrapper.Size = UDim2.new(0, 220, 0, 28)
     wrapper.Parent = sg
     self._wrapper = wrapper
 
-    -- Titlebar panel (fixed height, always visible)
     local tb = Instance.new("Frame")
     tb.Name = "Titlebar"
     tb.BackgroundColor3 = COLORS.titlebar
@@ -114,27 +109,24 @@ function WizardLib.new(scriptName)
     toggleBtn.Parent = tb
     self._toggleBtn = toggleBtn
 
-    -- Clip frame — sits below titlebar, clips the sliding content
-    -- Only this frame changes height on open/close
     local clip = Instance.new("Frame")
     clip.Name = "Clip"
     clip.BackgroundColor3 = COLORS.bg
     clip.BorderSizePixel = 0
     clip.Position = UDim2.new(0, 0, 0, 28)
-    clip.Size = UDim2.new(1, 0, 0, 0) -- starts closed
+    clip.Size = UDim2.new(1, 0, 0, 0)
     clip.ClipsDescendants = true
     corner(clip, 5)
     stroke(clip)
     clip.Parent = wrapper
     self._clip = clip
 
-    -- Content frame inside clip — full height, slides up/down via Position
     local content = Instance.new("Frame")
     content.Name = "Content"
     content.BackgroundTransparency = 1
     content.BorderSizePixel = 0
     content.Position = UDim2.new(0, 0, 0, 0)
-    content.Size = UDim2.new(1, 0, 0, 0) -- auto-sized by layout
+    content.Size = UDim2.new(1, 0, 0, 0)
     content.Parent = clip
     self._content = content
 
@@ -152,7 +144,6 @@ function WizardLib.new(scriptName)
     padding.PaddingBottom = UDim.new(0, 6)
     padding.Parent = content
 
-    -- Track content height; update content frame size and clip when open
     listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         local h = listLayout.AbsoluteContentSize.Y + 16
         self._contentHeight = h
@@ -163,16 +154,11 @@ function WizardLib.new(scriptName)
         end
     end)
 
-    -- Open/close: tween clip height only; titlebar never changes
     toggleBtn.MouseButton1Click:Connect(function()
         self:Toggle()
     end)
 
     self:_setupDrag()
-
-    -- Open on init with slide-down
-    self._open = false
-    self:Toggle()
 
     return self
 end
@@ -183,14 +169,12 @@ function WizardLib:Toggle()
 
     if self._open then
         self._toggleBtn.Text = "-"
-        -- Slide down: expand clip from 0 to full height
         self._clip.Size = UDim2.new(1, 0, 0, 0)
         self._wrapper.Size = UDim2.new(0, 220, 0, 28)
         makeTween(self._clip, { Size = UDim2.new(1, 0, 0, h) }, TWEEN_OPEN):Play()
         makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28 + h) }, TWEEN_OPEN):Play()
     else
         self._toggleBtn.Text = ">"
-        -- Slide up: collapse clip to 0
         makeTween(self._clip, { Size = UDim2.new(1, 0, 0, 0) }, TWEEN_CLOSE):Play()
         makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28) }, TWEEN_CLOSE):Play()
     end
