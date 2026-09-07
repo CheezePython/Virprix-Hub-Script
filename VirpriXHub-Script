@@ -1,0 +1,165 @@
+-- Virprix Hub [V2]
+-- Supported: Rivals, MM2, Steal an Egg, Flick, Slap Battle
+
+local ProxyLib = loadstring(game:HttpGet("https://raw.githubusercontent.com/ProxyHubDev/ProxyLib/refs/heads/main/Documents/ProxyLibrary"))()
+local Lib = ProxyLib.new()
+
+local Players          = game:GetService("Players")
+local RunService       = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService     = game:GetService("TweenService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local LocalPlayer      = Players.LocalPlayer
+
+-- ─── Game Detection ────────────────────────────────────────────────────────────
+local GAME_IDS = {
+    RIVALS      = 17625359962,
+    MM2         = 142823291,
+    STEAL_EGG   = 107778070777162,
+    FLICK       = 136801880565837,
+    SLAP_BATTLE = 6403373529,
+}
+
+local function getGame()
+    local id = game.PlaceId
+    for name, gid in pairs(GAME_IDS) do
+        if id == gid then return name end
+    end
+    return "UNKNOWN"
+end
+
+local CURRENT_GAME = getGame()
+
+-- ─── Window ────────────────────────────────────────────────────────────────────
+local Window = Lib:CreateWindow({
+    Title    = "Virprix Hub",
+    Subtitle = "V2",
+    Size     = Vector2.new(560, 400),
+    Theme    = "Blue",
+    TypeUI   = "Modern",
+    AutoSave = true,
+    AutoLoad = true,
+    TitleConfig = {
+        Gradient = true,
+        Colors   = { Color3.fromRGB(80, 180, 255), Color3.fromRGB(30, 90, 255) },
+        Words    = {
+            "Virprix",
+            {
+                Text   = "Hub",
+                Colors = { Color3.fromRGB(180, 80, 255), Color3.fromRGB(80, 30, 255) },
+            },
+        },
+    },
+    ConfigPanel = {
+        Enabled    = true,
+        Theme      = true,
+        Fps        = true,
+        Ping       = true,
+        Profile    = true,
+        Acrylic    = true,
+        Language   = true,
+        HideNotify = true,
+    },
+    Acrylic     = { Enabled = true, Opacity = 0.6 },
+    FloatButton = { Shape = "Circle", Color = "Black", Size = 50 },
+})
+
+-- ─── Home Tab ─────────────────────────────────────────────────────────────────
+Window:CreateSeparator({ Text = "HOME" })
+local HomeTab = Window:CreateTab({ Title = "Home" })
+
+HomeTab:CreateSection({ Text = "Info" })
+HomeTab:CreateParagraph({
+    Title       = "Virprix Hub [V2]",
+    Description = "Detected game: " .. CURRENT_GAME .. (CURRENT_GAME == "UNKNOWN" and " — no features loaded." or " — features loaded below."),
+    ColoredWords = {
+        { Text = CURRENT_GAME, Colors = { Color3.fromRGB(80, 200, 255) } },
+    },
+})
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ─── RIVALS ───────────────────────────────────────────────────────────────────
+-- ══════════════════════════════════════════════════════════════════════════════
+if CURRENT_GAME == "RIVALS" then
+    Window:CreateSeparator({ Text = "RIVALS" })
+    local RivalsTab = Window:CreateTab({ Title = "Rivals" })
+
+    RivalsTab:CreateSection({ Text = "Script" })
+    RivalsTab:CreateButton({
+        Title       = "Load Rivals Script",
+        Description = "Executes the Rivals loadstring from ObfuscatorHub.",
+        Callback    = function()
+            loadstring(game:HttpGet("https://obfuscatorhub.vercel.app/api/69nyf1bx"))()
+        end,
+    })
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ─── FLICK ────────────────────────────────────────────────────────────────────
+-- ══════════════════════════════════════════════════════════════════════════════
+elseif CURRENT_GAME == "FLICK" then
+    Window:CreateSeparator({ Text = "FLICK" })
+    local FlickTab = Window:CreateTab({ Title = "Flick" })
+
+    FlickTab:CreateSection({ Text = "Script" })
+    FlickTab:CreateButton({
+        Title       = "Load Flick Script",
+        Description = "Executes the Flick loadstring from Pastebin.",
+        Callback    = function()
+            loadstring(game:HttpGet("https://pastebin.com/raw/sddQDeie"))()
+        end,
+    })
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ─── MM2 ──────────────────────────────────────────────────────────────────────
+-- ══════════════════════════════════════════════════════════════════════════════
+elseif CURRENT_GAME == "MM2" then
+    Window:CreateSeparator({ Text = "MM2" })
+    local MM2Tab = Window:CreateTab({ Title = "MM2" })
+
+    MM2Tab:CreateSection({ Text = "Script" })
+    MM2Tab:CreateButton({
+        Title       = "Load MM2 Script",
+        Description = "Executes the MM2 script.",
+        Callback    = function()
+            loadstring(game:HttpGet("Test.example/raw"))()
+        end,
+    })
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ─── SLAP BATTLE ──────────────────────────────────────────────────────────────
+-- ══════════════════════════════════════════════════════════════════════════════
+elseif CURRENT_GAME == "SLAP_BATTLE" then
+    Window:CreateSeparator({ Text = "SLAP BATTLE" })
+    local SlapTab = Window:CreateTab({ Title = "Slap Battle" })
+
+    SlapTab:CreateSection({ Text = "Script" })
+    SlapTab:CreateButton({
+        Title       = "Load Slap Battle Script",
+        Description = "Executes the Slap Battle loadstring from ObfuscatorHub.",
+        Callback    = function()
+            loadstring(game:HttpGet("https://obfuscatorhub.vercel.app/api/le2mh2Km"))()
+        end,
+    })
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ─── STEAL AN EGG ─────────────────────────────────────────────────────────────
+-- ══════════════════════════════════════════════════════════════════════════════
+elseif CURRENT_GAME == "STEAL_EGG" then
+    loadstring(game:HttpGet("https://pastefy.app/EI3Lv54O/raw"))()
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- ─── UNKNOWN ──────────────────────────────────────────────────────────────────
+-- ══════════════════════════════════════════════════════════════════════════════
+else
+    HomeTab:CreateParagraph({
+        Title       = "Unsupported Game",
+        Description = "This game is not in the supported list. No features loaded.",
+    })
+end
+
+-- ─── Welcome Notify ───────────────────────────────────────────────────────────
+Window:Notify({
+    Title       = "Virprix Hub [V2]",
+    Description = "Loaded for: " .. CURRENT_GAME,
+    Duration    = 5,
+})
