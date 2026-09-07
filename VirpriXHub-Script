@@ -1,4 +1,4 @@
--- WizardLib.lua (v1.2 — opens correctly)
+-- WizardLib.lua (v1.3 — toggle fix)
 
 local WizardLib = {}
 WizardLib.__index = WizardLib
@@ -55,6 +55,7 @@ function WizardLib.new(scriptName)
     local self = setmetatable({}, WizardLib)
     self._open = true
     self._contentHeight = 0
+    self._locked = false -- blocks signal during tween
 
     local sg = Instance.new("ScreenGui")
     sg.Name = "WizardLib"
@@ -145,6 +146,7 @@ function WizardLib.new(scriptName)
     padding.Parent = content
 
     listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        if self._locked then return end  -- don't fight the tween
         local h = listLayout.AbsoluteContentSize.Y + 16
         self._contentHeight = h
         content.Size = UDim2.new(1, 0, 0, h)
@@ -166,17 +168,22 @@ end
 function WizardLib:Toggle()
     self._open = not self._open
     local h = self._contentHeight
+    self._locked = true  -- block signal while tweening
 
     if self._open then
         self._toggleBtn.Text = "-"
         self._clip.Size = UDim2.new(1, 0, 0, 0)
         self._wrapper.Size = UDim2.new(0, 220, 0, 28)
-        makeTween(self._clip, { Size = UDim2.new(1, 0, 0, h) }, TWEEN_OPEN):Play()
+        local t = makeTween(self._clip, { Size = UDim2.new(1, 0, 0, h) }, TWEEN_OPEN)
         makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28 + h) }, TWEEN_OPEN):Play()
+        t:Play()
+        t.Completed:Connect(function() self._locked = false end)
     else
         self._toggleBtn.Text = ">"
-        makeTween(self._clip, { Size = UDim2.new(1, 0, 0, 0) }, TWEEN_CLOSE):Play()
+        local t = makeTween(self._clip, { Size = UDim2.new(1, 0, 0, 0) }, TWEEN_CLOSE)
         makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28) }, TWEEN_CLOSE):Play()
+        t:Play()
+        t.Completed:Connect(function() self._locked = false end)
     end
 end
 
