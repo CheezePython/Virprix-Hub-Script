@@ -1,4 +1,4 @@
--- WizardLib.lua (v1.5 — tabs + button element)
+-- WizardLib.lua (v1.6 — titlebar-only collapse)
 
 local WizardLib = {}
 WizardLib.__index = WizardLib
@@ -7,15 +7,15 @@ local TweenService     = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local COLORS = {
-    bg       = Color3.fromRGB(34, 34, 34),
-    titlebar = Color3.fromRGB(42, 42, 42),
-    control  = Color3.fromRGB(58, 58, 58),
-    border   = Color3.fromRGB(60, 60, 60),
-    togon    = Color3.fromRGB(85, 85, 85),
-    tabactive= Color3.fromRGB(55, 55, 55),
-    text     = Color3.fromRGB(255, 255, 255),
-    muted    = Color3.fromRGB(170, 170, 170),
-    label    = Color3.fromRGB(120, 120, 120),
+    bg        = Color3.fromRGB(34, 34, 34),
+    titlebar  = Color3.fromRGB(42, 42, 42),
+    control   = Color3.fromRGB(58, 58, 58),
+    border    = Color3.fromRGB(60, 60, 60),
+    togon     = Color3.fromRGB(85, 85, 85),
+    tabactive = Color3.fromRGB(55, 55, 55),
+    text      = Color3.fromRGB(255, 255, 255),
+    muted     = Color3.fromRGB(170, 170, 170),
+    label     = Color3.fromRGB(120, 120, 120),
 }
 
 local TWEEN_OPEN  = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -56,10 +56,10 @@ function WizardLib.new(scriptName)
     local self = setmetatable({}, WizardLib)
     self._open          = true
     self._contentHeight = 0
+    self._tabHeight     = 0
     self._locked        = false
     self._tabs          = {}
     self._activeTab     = nil
-    self._tabHeight     = 0 -- grows as tabs are added
 
     local sg = Instance.new("ScreenGui")
     sg.Name           = "WizardLib"
@@ -68,17 +68,17 @@ function WizardLib.new(scriptName)
     sg.IgnoreGuiInset = true
     sg.Parent         = game:GetService("CoreGui")
 
-    -- Wrapper (drag anchor)
+    -- Wrapper: drag anchor, never clips
     local wrapper = Instance.new("Frame")
-    wrapper.Name                  = "Wrapper"
+    wrapper.Name                   = "Wrapper"
     wrapper.BackgroundTransparency = 1
-    wrapper.BorderSizePixel       = 0
-    wrapper.Position              = UDim2.new(0, 80, 0, 80)
-    wrapper.Size                  = UDim2.new(0, 220, 0, 28)
-    wrapper.Parent                = sg
+    wrapper.BorderSizePixel        = 0
+    wrapper.Position               = UDim2.new(0, 80, 0, 80)
+    wrapper.Size                   = UDim2.new(0, 220, 0, 28)
+    wrapper.Parent                 = sg
     self._wrapper = wrapper
 
-    -- Titlebar
+    -- Titlebar: always visible, never resizes
     local tb = Instance.new("Frame")
     tb.Name             = "Titlebar"
     tb.BackgroundColor3 = COLORS.titlebar
@@ -116,34 +116,35 @@ function WizardLib.new(scriptName)
     toggleBtn.Parent = tb
     self._toggleBtn  = toggleBtn
 
-    -- Tab list frame (sits below titlebar, above clip)
-    local tabList = Instance.new("Frame")
-    tabList.Name                  = "TabList"
-    tabList.BackgroundColor3      = COLORS.bg
-    tabList.BorderSizePixel       = 0
-    tabList.Position              = UDim2.new(0, 0, 0, 28)
-    tabList.Size                  = UDim2.new(1, 0, 0, 0) -- grows per tab added
-    tabList.ClipsDescendants      = false
-    tabList.Parent                = wrapper
-    self._tabList  = tabList
-    self._tabListLayout = Instance.new("UIListLayout")
-    self._tabListLayout.Padding           = UDim.new(0, 0)
-    self._tabListLayout.FillDirection     = Enum.FillDirection.Vertical
-    self._tabListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-    self._tabListLayout.Parent            = tabList
-
-    -- Clip (scrollable content area, below tab list)
+    -- Clip: sits at y=28, clips everything including tabs and content
     local clip = Instance.new("Frame")
     clip.Name             = "Clip"
     clip.BackgroundColor3 = COLORS.bg
     clip.BorderSizePixel  = 0
-    clip.Position         = UDim2.new(0, 0, 0, 28) -- updated when tabs added
+    clip.Position         = UDim2.new(0, 0, 0, 28)
     clip.Size             = UDim2.new(1, 0, 0, 0)
     clip.ClipsDescendants = true
     corner(clip, 5)
     stroke(clip)
     clip.Parent = wrapper
     self._clip  = clip
+
+    -- Tab list lives INSIDE clip so it collapses with everything
+    local tabList = Instance.new("Frame")
+    tabList.Name                   = "TabList"
+    tabList.BackgroundColor3       = COLORS.bg
+    tabList.BorderSizePixel        = 0
+    tabList.Position               = UDim2.new(0, 0, 0, 0)
+    tabList.Size                   = UDim2.new(1, 0, 0, 0)
+    tabList.Parent                 = clip
+    self._tabList = tabList
+
+    local tabListLayout = Instance.new("UIListLayout")
+    tabListLayout.Padding             = UDim.new(0, 0)
+    tabListLayout.FillDirection       = Enum.FillDirection.Vertical
+    tabListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    tabListLayout.Parent              = tabList
+    self._tabListLayout = tabListLayout
 
     toggleBtn.MouseButton1Click:Connect(function()
         self:_collapse()
@@ -154,12 +155,94 @@ function WizardLib.new(scriptName)
     return self
 end
 
--- Add a tab. Returns tab object with :Label/:Toggle/:Slider/:TextBox/:Button/:Text/:Divider
+function WizardLib:_syncWrapperSize()
+    local total = 28 + (self._open and (self._tabHeight + self._contentHeight) or 0)
+    self._wrapper.Size = UDim2.new(0, 220, 0, total)
+end
+
+function WizardLib:_openTab(tabData)
+    for _, t in ipairs(self._tabs) do
+        t.content.Visible      = false
+        t.btn.BackgroundColor3 = COLORS.bg
+        t.arrow.Text           = ">"
+    end
+    tabData.content.Visible      = true
+    tabData.btn.BackgroundColor3 = COLORS.tabactive
+    tabData.arrow.Text           = "-"
+    self._activeTab              = tabData
+    self._contentHeight          = tabData.height
+
+    if self._open then
+        self._clip.Size = UDim2.new(1, 0, 0, self._tabHeight + self._contentHeight)
+        self:_syncWrapperSize()
+    end
+end
+
+function WizardLib:_collapse()
+    self._open   = not self._open
+    local h      = self._tabHeight + self._contentHeight
+    self._locked = true
+
+    if self._open then
+        self._toggleBtn.Text = "-"
+        self._clip.Size      = UDim2.new(1, 0, 0, 0)
+        local t = makeTween(self._clip,    { Size = UDim2.new(1, 0, 0, h) },      TWEEN_OPEN)
+        makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28 + h) }, TWEEN_OPEN):Play()
+        t:Play()
+        t.Completed:Connect(function() self._locked = false end)
+    else
+        self._toggleBtn.Text = ">"
+        local t = makeTween(self._clip,    { Size = UDim2.new(1, 0, 0, 0) },  TWEEN_CLOSE)
+        makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28) }, TWEEN_CLOSE):Play()
+        t:Play()
+        t.Completed:Connect(function() self._locked = false end)
+    end
+end
+
+function WizardLib:_setupDrag()
+    local wrapper  = self._wrapper
+    local titlebar = self._titlebar
+    local dragging, dragInput, dragStart, startPos
+
+    local function update(input)
+        local delta = input.Position - dragStart
+        wrapper.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y
+        )
+    end
+
+    titlebar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragging  = true
+            dragStart = input.Position
+            startPos  = wrapper.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+
+    titlebar.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+            dragInput = input
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(input)
+        if input == dragInput and dragging then update(input) end
+    end)
+end
+
 function WizardLib:Tab(tabName)
     local self_lib = self
+    local TAB_H    = 28
 
-    -- Tab button row
-    local TAB_H = 28
+    -- Tab button row (inside tabList, inside clip)
     local tabBtn = Instance.new("TextButton")
     tabBtn.Name             = "Tab_" .. tabName
     tabBtn.BackgroundColor3 = COLORS.bg
@@ -190,7 +273,6 @@ function WizardLib:Tab(tabName)
     arrow.TextXAlignment = Enum.TextXAlignment.Center
     arrow.Parent         = tabBtn
 
-    -- Divider line under tab row
     local div = Instance.new("Frame")
     div.BackgroundColor3 = COLORS.border
     div.BorderSizePixel  = 0
@@ -198,15 +280,19 @@ function WizardLib:Tab(tabName)
     div.Size             = UDim2.new(1, 0, 0, 1)
     div.Parent           = tabBtn
 
-    -- Content frame for this tab (lives inside clip)
+    -- Update tab list size and clip position
+    self._tabHeight = #self._tabs * TAB_H + TAB_H
+    self._tabList.Size = UDim2.new(1, 0, 0, self._tabHeight)
+
+    -- Content frame: sits below tab list inside clip
     local content = Instance.new("Frame")
-    content.Name                  = "Content_" .. tabName
+    content.Name                   = "Content_" .. tabName
     content.BackgroundTransparency = 1
-    content.BorderSizePixel       = 0
-    content.Position              = UDim2.new(0, 0, 0, 0)
-    content.Size                  = UDim2.new(1, 0, 0, 0)
-    content.Visible               = false
-    content.Parent                = self._clip
+    content.BorderSizePixel        = 0
+    content.Position               = UDim2.new(0, 0, 0, self._tabHeight)
+    content.Size                   = UDim2.new(1, 0, 0, 0)
+    content.Visible                = false
+    content.Parent                 = self._clip
 
     local listLayout = Instance.new("UIListLayout")
     listLayout.Padding             = UDim.new(0, 3)
@@ -222,15 +308,14 @@ function WizardLib:Tab(tabName)
     padding.Parent        = content
 
     local tabData = {
-        btn      = tabBtn,
-        arrow    = arrow,
-        content  = content,
-        layout   = listLayout,
-        height   = 0,
+        btn     = tabBtn,
+        arrow   = arrow,
+        content = content,
+        layout  = listLayout,
+        height  = 0,
     }
     table.insert(self._tabs, tabData)
 
-    -- Track this tab's content height
     listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         if self_lib._locked then return end
         local h = listLayout.AbsoluteContentSize.Y + 16
@@ -238,19 +323,11 @@ function WizardLib:Tab(tabName)
         content.Size   = UDim2.new(1, 0, 0, h)
         if self_lib._activeTab == tabData and self_lib._open then
             self_lib._contentHeight = h
-            self_lib._clip.Size     = UDim2.new(1, 0, 0, h)
+            self_lib._clip.Size     = UDim2.new(1, 0, 0, self_lib._tabHeight + h)
             self_lib:_syncWrapperSize()
         end
     end)
 
-    -- Update tab list height and clip position when tabs added
-    self._tabHeight = #self._tabs * TAB_H
-    self._tabList.Size     = UDim2.new(1, 0, 0, self._tabHeight)
-    self._clip.Position    = UDim2.new(0, 0, 0, 28 + self._tabHeight)
-    self._wrapper.Size     = UDim2.new(0, 220, 0, 28 + self._tabHeight
-        + (self._open and self._contentHeight or 0))
-
-    -- Click: open this tab's content
     tabBtn.MouseButton1Click:Connect(function()
         self_lib:_openTab(tabData)
     end)
@@ -260,7 +337,7 @@ function WizardLib:Tab(tabName)
         self:_openTab(tabData)
     end
 
-    -- Return tab API so caller can chain elements onto it
+    -- Tab element API
     local tabAPI = {}
 
     local function row(h)
@@ -287,7 +364,7 @@ function WizardLib:Tab(tabName)
     end
 
     function tabAPI:Divider()
-        local r = row(10)
+        local r    = row(10)
         local line = Instance.new("Frame")
         line.BackgroundColor3 = Color3.fromRGB(55, 55, 55)
         line.BorderSizePixel  = 0
@@ -299,7 +376,7 @@ function WizardLib:Tab(tabName)
 
     function tabAPI:Toggle(name, default, callback)
         local state = default or false
-        local r = row(24)
+        local r     = row(24)
         makeLabel(r, name, 11, COLORS.text)
 
         local btn = Instance.new("TextButton")
@@ -455,91 +532,6 @@ function WizardLib:Tab(tabName)
     end
 
     return tabAPI
-end
-
-function WizardLib:_openTab(tabData)
-    -- Hide all, deactivate arrows
-    for _, t in ipairs(self._tabs) do
-        t.content.Visible       = false
-        t.btn.BackgroundColor3  = COLORS.bg
-        t.arrow.Text            = ">"
-    end
-    -- Show selected
-    tabData.content.Visible      = true
-    tabData.btn.BackgroundColor3 = COLORS.tabactive
-    tabData.arrow.Text           = "-"
-    self._activeTab              = tabData
-    self._contentHeight          = tabData.height
-    if self._open then
-        self._clip.Size = UDim2.new(1, 0, 0, tabData.height)
-        self:_syncWrapperSize()
-    end
-end
-
-function WizardLib:_syncWrapperSize()
-    local total = 28 + self._tabHeight + (self._open and self._contentHeight or 0)
-    self._wrapper.Size = UDim2.new(0, 220, 0, total)
-end
-
-function WizardLib:_collapse()
-    self._open   = not self._open
-    local h      = self._contentHeight
-    self._locked = true
-
-    if self._open then
-        self._toggleBtn.Text = "-"
-        self._clip.Size      = UDim2.new(1, 0, 0, 0)
-        self:_syncWrapperSize()
-        local t = makeTween(self._clip, { Size = UDim2.new(1, 0, 0, h) }, TWEEN_OPEN)
-        makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28 + self._tabHeight + h) }, TWEEN_OPEN):Play()
-        t:Play()
-        t.Completed:Connect(function() self._locked = false end)
-    else
-        self._toggleBtn.Text = ">"
-        local t = makeTween(self._clip, { Size = UDim2.new(1, 0, 0, 0) }, TWEEN_CLOSE)
-        makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28 + self._tabHeight) }, TWEEN_CLOSE):Play()
-        t:Play()
-        t.Completed:Connect(function() self._locked = false end)
-    end
-end
-
-function WizardLib:_setupDrag()
-    local wrapper  = self._wrapper
-    local titlebar = self._titlebar
-    local dragging, dragInput, dragStart, startPos
-
-    local function update(input)
-        local delta = input.Position - dragStart
-        wrapper.Position = UDim2.new(
-            startPos.X.Scale, startPos.X.Offset + delta.X,
-            startPos.Y.Scale, startPos.Y.Offset + delta.Y
-        )
-    end
-
-    titlebar.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-            dragging  = true
-            dragStart = input.Position
-            startPos  = wrapper.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then
-                    dragging = false
-                end
-            end)
-        end
-    end)
-
-    titlebar.InputChanged:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch then
-            dragInput = input
-        end
-    end)
-
-    UserInputService.InputChanged:Connect(function(input)
-        if input == dragInput and dragging then update(input) end
-    end)
 end
 
 return WizardLib
