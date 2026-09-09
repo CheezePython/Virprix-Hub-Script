@@ -1,4 +1,4 @@
--- WizardLib.lua (v1.6 — titlebar-only collapse)
+-- WizardLib.lua (v1.7 — layout fix)
 
 local WizardLib = {}
 WizardLib.__index = WizardLib
@@ -68,7 +68,6 @@ function WizardLib.new(scriptName)
     sg.IgnoreGuiInset = true
     sg.Parent         = game:GetService("CoreGui")
 
-    -- Wrapper: drag anchor, never clips
     local wrapper = Instance.new("Frame")
     wrapper.Name                   = "Wrapper"
     wrapper.BackgroundTransparency = 1
@@ -78,7 +77,6 @@ function WizardLib.new(scriptName)
     wrapper.Parent                 = sg
     self._wrapper = wrapper
 
-    -- Titlebar: always visible, never resizes
     local tb = Instance.new("Frame")
     tb.Name             = "Titlebar"
     tb.BackgroundColor3 = COLORS.titlebar
@@ -116,7 +114,7 @@ function WizardLib.new(scriptName)
     toggleBtn.Parent = tb
     self._toggleBtn  = toggleBtn
 
-    -- Clip: sits at y=28, clips everything including tabs and content
+    -- Clip: everything including tabs collapses inside here
     local clip = Instance.new("Frame")
     clip.Name             = "Clip"
     clip.BackgroundColor3 = COLORS.bg
@@ -129,13 +127,22 @@ function WizardLib.new(scriptName)
     clip.Parent = wrapper
     self._clip  = clip
 
-    -- Tab list lives INSIDE clip so it collapses with everything
+    -- Single UIListLayout inside clip stacks tabList + activeContent automatically
+    local clipLayout = Instance.new("UIListLayout")
+    clipLayout.Padding             = UDim.new(0, 0)
+    clipLayout.FillDirection       = Enum.FillDirection.Vertical
+    clipLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    clipLayout.SortOrder           = Enum.SortOrder.LayoutOrder
+    clipLayout.Parent              = clip
+    self._clipLayout = clipLayout
+
+    -- Tab list container (LayoutOrder 1 — always on top)
     local tabList = Instance.new("Frame")
     tabList.Name                   = "TabList"
     tabList.BackgroundColor3       = COLORS.bg
     tabList.BorderSizePixel        = 0
-    tabList.Position               = UDim2.new(0, 0, 0, 0)
     tabList.Size                   = UDim2.new(1, 0, 0, 0)
+    tabList.LayoutOrder            = 1
     tabList.Parent                 = clip
     self._tabList = tabList
 
@@ -144,23 +151,49 @@ function WizardLib.new(scriptName)
     tabListLayout.FillDirection       = Enum.FillDirection.Vertical
     tabListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     tabListLayout.Parent              = tabList
-    self._tabListLayout = tabListLayout
+
+    -- Auto-resize tabList to fit its children
+    tabListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        self._tabHeight    = tabListLayout.AbsoluteContentSize.Y
+        tabList.Size       = UDim2.new(1, 0, 0, self._tabHeight)
+    end)
+
+    -- Content container (LayoutOrder 2 — always below tabs)
+    local contentHolder = Instance.new("Frame")
+    contentHolder.Name                   = "ContentHolder"
+    contentHolder.BackgroundTransparency = 1
+    contentHolder.BorderSizePixel        = 0
+    contentHolder.Size                   = UDim2.new(1, 0, 0, 0)
+    contentHolder.LayoutOrder            = 2
+    contentHolder.ClipsDescendants       = false
+    contentHolder.Parent                 = clip
+    self._contentHolder = contentHolder
+
+    -- Clip total height tracks via clipLayout
+    clipLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        if self._locked then return end
+        local h = clipLayout.AbsoluteContentSize.Y
+        if self._open then
+            clip.Size      = UDim2.new(1, 0, 0, h)
+            wrapper.Size   = UDim2.new(0, 220, 0, 28 + h)
+        end
+    end)
 
     toggleBtn.MouseButton1Click:Connect(function()
         self:_collapse()
     end)
 
     self:_setupDrag()
-
     return self
 end
 
 function WizardLib:_syncWrapperSize()
-    local total = 28 + (self._open and (self._tabHeight + self._contentHeight) or 0)
-    self._wrapper.Size = UDim2.new(0, 220, 0, total)
+    local h = self._tabHeight + self._contentHeight
+    self._wrapper.Size = UDim2.new(0, 220, 0, 28 + (self._open and h or 0))
 end
 
 function WizardLib:_openTab(tabData)
+    -- Hide all content frames
     for _, t in ipairs(self._tabs) do
         t.content.Visible      = false
         t.btn.BackgroundColor3 = COLORS.bg
@@ -171,10 +204,12 @@ function WizardLib:_openTab(tabData)
     tabData.arrow.Text           = "-"
     self._activeTab              = tabData
     self._contentHeight          = tabData.height
+    self._contentHolder.Size     = UDim2.new(1, 0, 0, tabData.height)
 
     if self._open then
-        self._clip.Size = UDim2.new(1, 0, 0, self._tabHeight + self._contentHeight)
-        self:_syncWrapperSize()
+        local h = self._tabHeight + tabData.height
+        self._clip.Size    = UDim2.new(1, 0, 0, h)
+        self._wrapper.Size = UDim2.new(0, 220, 0, 28 + h)
     end
 end
 
@@ -242,7 +277,6 @@ function WizardLib:Tab(tabName)
     local self_lib = self
     local TAB_H    = 28
 
-    -- Tab button row (inside tabList, inside clip)
     local tabBtn = Instance.new("TextButton")
     tabBtn.Name             = "Tab_" .. tabName
     tabBtn.BackgroundColor3 = COLORS.bg
@@ -280,19 +314,15 @@ function WizardLib:Tab(tabName)
     div.Size             = UDim2.new(1, 0, 0, 1)
     div.Parent           = tabBtn
 
-    -- Update tab list size and clip position
-    self._tabHeight = #self._tabs * TAB_H + TAB_H
-    self._tabList.Size = UDim2.new(1, 0, 0, self._tabHeight)
-
-    -- Content frame: sits below tab list inside clip
+    -- Content lives inside contentHolder, not clip directly
     local content = Instance.new("Frame")
     content.Name                   = "Content_" .. tabName
     content.BackgroundTransparency = 1
     content.BorderSizePixel        = 0
-    content.Position               = UDim2.new(0, 0, 0, self._tabHeight)
+    content.Position               = UDim2.new(0, 0, 0, 0)
     content.Size                   = UDim2.new(1, 0, 0, 0)
     content.Visible                = false
-    content.Parent                 = self._clip
+    content.Parent                 = self._contentHolder
 
     local listLayout = Instance.new("UIListLayout")
     listLayout.Padding             = UDim.new(0, 3)
@@ -322,9 +352,11 @@ function WizardLib:Tab(tabName)
         tabData.height = h
         content.Size   = UDim2.new(1, 0, 0, h)
         if self_lib._activeTab == tabData and self_lib._open then
-            self_lib._contentHeight = h
-            self_lib._clip.Size     = UDim2.new(1, 0, 0, self_lib._tabHeight + h)
-            self_lib:_syncWrapperSize()
+            self_lib._contentHeight          = h
+            self_lib._contentHolder.Size     = UDim2.new(1, 0, 0, h)
+            local total = self_lib._tabHeight + h
+            self_lib._clip.Size    = UDim2.new(1, 0, 0, total)
+            self_lib._wrapper.Size = UDim2.new(0, 220, 0, 28 + total)
         end
     end)
 
@@ -332,12 +364,10 @@ function WizardLib:Tab(tabName)
         self_lib:_openTab(tabData)
     end)
 
-    -- Auto-open first tab
     if #self._tabs == 1 then
         self:_openTab(tabData)
     end
 
-    -- Tab element API
     local tabAPI = {}
 
     local function row(h)
