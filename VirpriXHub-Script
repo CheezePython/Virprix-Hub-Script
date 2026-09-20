@@ -1,4 +1,4 @@
--- WizardLib.lua (v1.9 — mode switch fix)
+-- WizardLib.lua (v2.0 — final, dropdown added)
 
 local WizardLib = {}
 WizardLib.__index = WizardLib
@@ -13,6 +13,8 @@ local COLORS = {
     border    = Color3.fromRGB(60, 60, 60),
     togon     = Color3.fromRGB(85, 85, 85),
     tabactive = Color3.fromRGB(55, 55, 55),
+    dditem    = Color3.fromRGB(45, 45, 45),
+    ddhover   = Color3.fromRGB(65, 65, 65),
     text      = Color3.fromRGB(255, 255, 255),
     muted     = Color3.fromRGB(170, 170, 170),
     label     = Color3.fromRGB(120, 120, 120),
@@ -81,20 +83,16 @@ function WizardLib.new(scriptName, mode)
 end
 
 function WizardLib:_buildShell()
-    -- Detach tab buttons and content BEFORE destroying wrapper
     for _, t in ipairs(self._tabs) do
         t.btn.Parent     = self._sg
         t.content.Parent = self._sg
     end
 
-    if self._wrapper then
-        self._wrapper:Destroy()
-    end
+    if self._wrapper then self._wrapper:Destroy() end
 
     local isWide = self._mode == "wide"
     local W      = isWide and WIDE_W or COMPACT_W
 
-    -- Wrapper
     local wrapper = Instance.new("Frame")
     wrapper.Name                   = "Wrapper"
     wrapper.BackgroundTransparency = 1
@@ -104,7 +102,6 @@ function WizardLib:_buildShell()
     wrapper.Parent                 = self._sg
     self._wrapper = wrapper
 
-    -- Titlebar
     local tb = Instance.new("Frame")
     tb.Name             = "Titlebar"
     tb.BackgroundColor3 = COLORS.titlebar
@@ -127,7 +124,6 @@ function WizardLib:_buildShell()
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Parent         = tb
 
-    -- Mode button
     local modeBtn = Instance.new("TextButton")
     modeBtn.Name             = "ModeBtn"
     modeBtn.BackgroundColor3 = COLORS.control
@@ -143,7 +139,6 @@ function WizardLib:_buildShell()
     modeBtn.Parent = tb
     self._modeBtn  = modeBtn
 
-    -- Collapse button
     local toggleBtn = Instance.new("TextButton")
     toggleBtn.Name             = "ToggleBtn"
     toggleBtn.BackgroundColor3 = COLORS.control
@@ -159,7 +154,6 @@ function WizardLib:_buildShell()
     toggleBtn.Parent = tb
     self._toggleBtn  = toggleBtn
 
-    -- Clip
     local clip = Instance.new("Frame")
     clip.Name             = "Clip"
     clip.BackgroundColor3 = COLORS.bg
@@ -255,7 +249,6 @@ end
 function WizardLib:_buildWideLayout()
     local clip = self._clip
 
-    -- Left panel (tabs)
     local leftPanel = Instance.new("Frame")
     leftPanel.Name             = "LeftPanel"
     leftPanel.BackgroundColor3 = Color3.fromRGB(38, 38, 38)
@@ -290,7 +283,6 @@ function WizardLib:_buildWideLayout()
         tabList.Size    = UDim2.new(1, 0, 0, self._tabHeight)
     end)
 
-    -- Right panel (content)
     local rightPanel = Instance.new("Frame")
     rightPanel.Name                   = "RightPanel"
     rightPanel.BackgroundTransparency = 1
@@ -309,7 +301,6 @@ function WizardLib:_buildWideLayout()
     contentHolder.Parent                 = rightPanel
     self._contentHolder = contentHolder
 
-    -- Wide mode fixed height
     clip.Size          = UDim2.new(1, 0, 0, WIDE_H)
     self._wrapper.Size = UDim2.new(0, WIDE_W, 0, 28 + WIDE_H)
     self._contentHeight = WIDE_H
@@ -708,6 +699,153 @@ function WizardLib:Tab(tabName)
         btn.MouseButton1Click:Connect(function()
             if callback then callback() end
         end)
+        return self
+    end
+
+    function tabAPI:Dropdown(name, options, default, callback)
+        local selected  = default or options[1] or ""
+        local ddOpen    = false
+        local ITEM_H    = 22
+        local HEAD_H    = 26
+
+        -- Outer wrapper row — grows when open
+        local outer = Instance.new("Frame")
+        outer.Name                   = "DD_" .. name
+        outer.BackgroundTransparency = 1
+        outer.BorderSizePixel        = 0
+        outer.Size                   = UDim2.new(1, 0, 0, HEAD_H)
+        outer.ClipsDescendants       = false
+        outer.Parent                 = content
+
+        local outerLayout = Instance.new("UIListLayout")
+        outerLayout.Padding         = UDim.new(0, 0)
+        outerLayout.FillDirection   = Enum.FillDirection.Vertical
+        outerLayout.Parent          = outer
+
+        -- Header row
+        local head = Instance.new("TextButton")
+        head.Name             = "Head"
+        head.BackgroundColor3 = COLORS.control
+        head.BorderSizePixel  = 0
+        head.Text             = ""
+        head.Size             = UDim2.new(1, 0, 0, HEAD_H)
+        corner(head, 4)
+        stroke(head)
+        head.Parent = outer
+
+        local nameL = Instance.new("TextLabel")
+        nameL.BackgroundTransparency = 1
+        nameL.Text           = name
+        nameL.TextColor3     = COLORS.muted
+        nameL.TextSize       = 10
+        nameL.Font           = Enum.Font.GothamBold
+        nameL.Position       = UDim2.new(0, 8, 0, 0)
+        nameL.Size           = UDim2.new(0.4, 0, 1, 0)
+        nameL.TextXAlignment = Enum.TextXAlignment.Left
+        nameL.Parent         = head
+
+        local selL = Instance.new("TextLabel")
+        selL.BackgroundTransparency = 1
+        selL.Text           = selected
+        selL.TextColor3     = COLORS.text
+        selL.TextSize       = 11
+        selL.Font           = Enum.Font.Gotham
+        selL.Position       = UDim2.new(0.4, 0, 0, 0)
+        selL.Size           = UDim2.new(0.5, 0, 1, 0)
+        selL.TextXAlignment = Enum.TextXAlignment.Right
+        selL.Parent         = head
+
+        local chevron = Instance.new("TextLabel")
+        chevron.BackgroundTransparency = 1
+        chevron.Text           = "v"
+        chevron.TextColor3     = COLORS.muted
+        chevron.TextSize       = 10
+        chevron.Font           = Enum.Font.GothamBold
+        chevron.Position       = UDim2.new(1, -20, 0, 0)
+        chevron.Size           = UDim2.new(0, 16, 1, 0)
+        chevron.TextXAlignment = Enum.TextXAlignment.Center
+        chevron.Parent         = head
+
+        -- List frame (hidden until open)
+        local list = Instance.new("Frame")
+        list.Name             = "List"
+        list.BackgroundColor3 = COLORS.dditem
+        list.BorderSizePixel  = 0
+        list.Size             = UDim2.new(1, 0, 0, 0)
+        list.ClipsDescendants = true
+        corner(list, 4)
+        stroke(list)
+        list.Parent = outer
+
+        local listLayout2 = Instance.new("UIListLayout")
+        listLayout2.Padding           = UDim.new(0, 0)
+        listLayout2.FillDirection     = Enum.FillDirection.Vertical
+        listLayout2.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        listLayout2.Parent            = list
+
+        local fullH = #options * ITEM_H
+
+        -- Build option rows
+        for _, opt in ipairs(options) do
+            local item = Instance.new("TextButton")
+            item.Name             = "Item_" .. opt
+            item.BackgroundColor3 = COLORS.dditem
+            item.BorderSizePixel  = 0
+            item.Text             = ""
+            item.Size             = UDim2.new(1, 0, 0, ITEM_H)
+            item.Parent           = list
+
+            local itemL = Instance.new("TextLabel")
+            itemL.BackgroundTransparency = 1
+            itemL.Text           = opt
+            itemL.TextColor3     = COLORS.text
+            itemL.TextSize       = 11
+            itemL.Font           = Enum.Font.Gotham
+            itemL.Position       = UDim2.new(0, 10, 0, 0)
+            itemL.Size           = UDim2.new(1, -10, 1, 0)
+            itemL.TextXAlignment = Enum.TextXAlignment.Left
+            itemL.Parent         = item
+
+            local itemDiv = Instance.new("Frame")
+            itemDiv.BackgroundColor3 = COLORS.border
+            itemDiv.BorderSizePixel  = 0
+            itemDiv.Position         = UDim2.new(0, 0, 1, -1)
+            itemDiv.Size             = UDim2.new(1, 0, 0, 1)
+            itemDiv.Parent           = item
+
+            item.MouseEnter:Connect(function()
+                item.BackgroundColor3 = COLORS.ddhover
+            end)
+            item.MouseLeave:Connect(function()
+                item.BackgroundColor3 = COLORS.dditem
+            end)
+
+            item.MouseButton1Click:Connect(function()
+                selected  = opt
+                selL.Text = opt
+                -- Close
+                ddOpen = false
+                chevron.Text = "v"
+                makeTween(list, { Size = UDim2.new(1, 0, 0, 0) }, TWEEN_CLOSE):Play()
+                outer.Size = UDim2.new(1, 0, 0, HEAD_H)
+                if callback then callback(opt) end
+            end)
+        end
+
+        -- Toggle open/close
+        head.MouseButton1Click:Connect(function()
+            ddOpen = not ddOpen
+            if ddOpen then
+                chevron.Text = "^"
+                outer.Size   = UDim2.new(1, 0, 0, HEAD_H + fullH)
+                makeTween(list, { Size = UDim2.new(1, 0, 0, fullH) }, TWEEN_OPEN):Play()
+            else
+                chevron.Text = "v"
+                makeTween(list, { Size = UDim2.new(1, 0, 0, 0) }, TWEEN_CLOSE):Play()
+                outer.Size   = UDim2.new(1, 0, 0, HEAD_H)
+            end
+        end)
+
         return self
     end
 
