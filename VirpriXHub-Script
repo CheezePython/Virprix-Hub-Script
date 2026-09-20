@@ -1,4 +1,4 @@
--- WizardLib.lua (v1.7 — layout fix)
+-- WizardLib.lua (v1.8 — compact + wide mode)
 
 local WizardLib = {}
 WizardLib.__index = WizardLib
@@ -20,6 +20,10 @@ local COLORS = {
 
 local TWEEN_OPEN  = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 local TWEEN_CLOSE = TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+
+local COMPACT_W = 220
+local WIDE_W    = 420
+local WIDE_TAB  = 90  -- left panel width in wide mode
 
 local function makeTween(obj, props, info)
     return TweenService:Create(obj, info or TWEEN_OPEN, props)
@@ -52,7 +56,7 @@ local function makeLabel(parent, text, size, color)
     return l
 end
 
-function WizardLib.new(scriptName)
+function WizardLib.new(scriptName, mode)
     local self = setmetatable({}, WizardLib)
     self._open          = true
     self._contentHeight = 0
@@ -60,6 +64,8 @@ function WizardLib.new(scriptName)
     self._locked        = false
     self._tabs          = {}
     self._activeTab     = nil
+    self._mode          = (mode == "wide") and "wide" or "compact"
+    self._scriptName    = scriptName
 
     local sg = Instance.new("ScreenGui")
     sg.Name           = "WizardLib"
@@ -67,16 +73,29 @@ function WizardLib.new(scriptName)
     sg.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     sg.IgnoreGuiInset = true
     sg.Parent         = game:GetService("CoreGui")
+    self._sg          = sg
+
+    self:_buildShell()
+    return self
+end
+
+function WizardLib:_buildShell()
+    -- Destroy old wrapper if rebuilding
+    if self._wrapper then self._wrapper:Destroy() end
+
+    local isWide = self._mode == "wide"
+    local W      = isWide and WIDE_W or COMPACT_W
 
     local wrapper = Instance.new("Frame")
     wrapper.Name                   = "Wrapper"
     wrapper.BackgroundTransparency = 1
     wrapper.BorderSizePixel        = 0
     wrapper.Position               = UDim2.new(0, 80, 0, 80)
-    wrapper.Size                   = UDim2.new(0, 220, 0, 28)
-    wrapper.Parent                 = sg
+    wrapper.Size                   = UDim2.new(0, W, 0, 28)
+    wrapper.Parent                 = self._sg
     self._wrapper = wrapper
 
+    -- Titlebar
     local tb = Instance.new("Frame")
     tb.Name             = "Titlebar"
     tb.BackgroundColor3 = COLORS.titlebar
@@ -90,15 +109,32 @@ function WizardLib.new(scriptName)
 
     local title = Instance.new("TextLabel")
     title.BackgroundTransparency = 1
-    title.Text           = scriptName or "Script"
+    title.Text           = self._scriptName or "Script"
     title.TextColor3     = COLORS.text
     title.TextSize       = 12
     title.Font           = Enum.Font.GothamBold
     title.Position       = UDim2.new(0, 10, 0, 0)
-    title.Size           = UDim2.new(1, -40, 1, 0)
+    title.Size           = UDim2.new(1, -60, 1, 0)
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Parent         = tb
 
+    -- Mode toggle button (+/-)
+    local modeBtn = Instance.new("TextButton")
+    modeBtn.Name             = "ModeBtn"
+    modeBtn.BackgroundColor3 = COLORS.control
+    modeBtn.BorderSizePixel  = 0
+    modeBtn.Position         = UDim2.new(1, -52, 0.5, -11)
+    modeBtn.Size             = UDim2.new(0, 22, 0, 22)
+    modeBtn.Text             = isWide and "-|" or "+"
+    modeBtn.TextColor3       = COLORS.text
+    modeBtn.TextSize         = 11
+    modeBtn.Font             = Enum.Font.GothamBold
+    modeBtn.ZIndex           = 3
+    corner(modeBtn, 4)
+    modeBtn.Parent   = tb
+    self._modeBtn    = modeBtn
+
+    -- Collapse button
     local toggleBtn = Instance.new("TextButton")
     toggleBtn.Name             = "ToggleBtn"
     toggleBtn.BackgroundColor3 = COLORS.control
@@ -114,7 +150,7 @@ function WizardLib.new(scriptName)
     toggleBtn.Parent = tb
     self._toggleBtn  = toggleBtn
 
-    -- Clip: everything including tabs collapses inside here
+    -- Clip
     local clip = Instance.new("Frame")
     clip.Name             = "Clip"
     clip.BackgroundColor3 = COLORS.bg
@@ -127,7 +163,39 @@ function WizardLib.new(scriptName)
     clip.Parent = wrapper
     self._clip  = clip
 
-    -- Single UIListLayout inside clip stacks tabList + activeContent automatically
+    if isWide then
+        self:_buildWideLayout()
+    else
+        self:_buildCompactLayout()
+    end
+
+    -- Wire buttons
+    toggleBtn.MouseButton1Click:Connect(function()
+        self:_collapse()
+    end)
+    modeBtn.MouseButton1Click:Connect(function()
+        local oldPos = self._wrapper.Position
+        self._mode = (self._mode == "wide") and "compact" or "wide"
+        self:_buildShell()
+        self._wrapper.Position = oldPos
+        -- Re-attach all tabs to new shell
+        for _, t in ipairs(self._tabs) do
+            self:_attachTab(t)
+        end
+        -- Re-open active tab
+        if self._activeTab then
+            self:_openTab(self._activeTab)
+        elseif #self._tabs > 0 then
+            self:_openTab(self._tabs[1])
+        end
+    end)
+
+    self:_setupDrag()
+end
+
+function WizardLib:_buildCompactLayout()
+    local clip = self._clip
+
     local clipLayout = Instance.new("UIListLayout")
     clipLayout.Padding             = UDim.new(0, 0)
     clipLayout.FillDirection       = Enum.FillDirection.Vertical
@@ -136,99 +204,167 @@ function WizardLib.new(scriptName)
     clipLayout.Parent              = clip
     self._clipLayout = clipLayout
 
-    -- Tab list container (LayoutOrder 1 — always on top)
     local tabList = Instance.new("Frame")
-    tabList.Name                   = "TabList"
-    tabList.BackgroundColor3       = COLORS.bg
-    tabList.BorderSizePixel        = 0
-    tabList.Size                   = UDim2.new(1, 0, 0, 0)
-    tabList.LayoutOrder            = 1
-    tabList.Parent                 = clip
-    self._tabList = tabList
+    tabList.Name             = "TabList"
+    tabList.BackgroundColor3 = COLORS.bg
+    tabList.BorderSizePixel  = 0
+    tabList.Size             = UDim2.new(1, 0, 0, 0)
+    tabList.LayoutOrder      = 1
+    tabList.Parent           = clip
+    self._tabList            = tabList
 
     local tabListLayout = Instance.new("UIListLayout")
     tabListLayout.Padding             = UDim.new(0, 0)
     tabListLayout.FillDirection       = Enum.FillDirection.Vertical
     tabListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     tabListLayout.Parent              = tabList
+    self._tabListLayout = tabListLayout
 
-    -- Auto-resize tabList to fit its children
     tabListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        self._tabHeight    = tabListLayout.AbsoluteContentSize.Y
-        tabList.Size       = UDim2.new(1, 0, 0, self._tabHeight)
+        self._tabHeight  = tabListLayout.AbsoluteContentSize.Y
+        tabList.Size     = UDim2.new(1, 0, 0, self._tabHeight)
     end)
 
-    -- Content container (LayoutOrder 2 — always below tabs)
     local contentHolder = Instance.new("Frame")
     contentHolder.Name                   = "ContentHolder"
     contentHolder.BackgroundTransparency = 1
     contentHolder.BorderSizePixel        = 0
     contentHolder.Size                   = UDim2.new(1, 0, 0, 0)
     contentHolder.LayoutOrder            = 2
-    contentHolder.ClipsDescendants       = false
     contentHolder.Parent                 = clip
     self._contentHolder = contentHolder
 
-    -- Clip total height tracks via clipLayout
     clipLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         if self._locked then return end
         local h = clipLayout.AbsoluteContentSize.Y
         if self._open then
-            clip.Size      = UDim2.new(1, 0, 0, h)
-            wrapper.Size   = UDim2.new(0, 220, 0, 28 + h)
+            clip.Size            = UDim2.new(1, 0, 0, h)
+            self._wrapper.Size   = UDim2.new(0, COMPACT_W, 0, 28 + h)
         end
     end)
-
-    toggleBtn.MouseButton1Click:Connect(function()
-        self:_collapse()
-    end)
-
-    self:_setupDrag()
-    return self
 end
 
-function WizardLib:_syncWrapperSize()
-    local h = self._tabHeight + self._contentHeight
-    self._wrapper.Size = UDim2.new(0, 220, 0, 28 + (self._open and h or 0))
+function WizardLib:_buildWideLayout()
+    local clip    = self._clip
+    local FIXED_H = 260  -- fixed panel height in wide mode
+
+    -- Left panel: tab list
+    local leftPanel = Instance.new("Frame")
+    leftPanel.Name             = "LeftPanel"
+    leftPanel.BackgroundColor3 = Color3.fromRGB(38, 38, 38)
+    leftPanel.BorderSizePixel  = 0
+    leftPanel.Position         = UDim2.new(0, 0, 0, 0)
+    leftPanel.Size             = UDim2.new(0, WIDE_TAB, 1, 0)
+    leftPanel.Parent           = clip
+
+    local leftStroke = Instance.new("UIStroke")
+    leftStroke.Color     = COLORS.border
+    leftStroke.Thickness = 1
+    leftStroke.Parent    = leftPanel
+
+    local tabList = Instance.new("Frame")
+    tabList.Name             = "TabList"
+    tabList.BackgroundTransparency = 1
+    tabList.BorderSizePixel  = 0
+    tabList.Position         = UDim2.new(0, 0, 0, 0)
+    tabList.Size             = UDim2.new(1, 0, 0, 0)
+    tabList.Parent           = leftPanel
+    self._tabList            = tabList
+
+    local tabListLayout = Instance.new("UIListLayout")
+    tabListLayout.Padding             = UDim.new(0, 0)
+    tabListLayout.FillDirection       = Enum.FillDirection.Vertical
+    tabListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+    tabListLayout.Parent              = tabList
+    self._tabListLayout = tabListLayout
+
+    tabListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+        self._tabHeight = tabListLayout.AbsoluteContentSize.Y
+        tabList.Size    = UDim2.new(1, 0, 0, self._tabHeight)
+    end)
+
+    -- Right panel: content
+    local rightPanel = Instance.new("Frame")
+    rightPanel.Name                   = "RightPanel"
+    rightPanel.BackgroundTransparency = 1
+    rightPanel.BorderSizePixel        = 0
+    rightPanel.Position               = UDim2.new(0, WIDE_TAB, 0, 0)
+    rightPanel.Size                   = UDim2.new(1, -WIDE_TAB, 1, 0)
+    rightPanel.ClipsDescendants       = true
+    rightPanel.Parent                 = clip
+
+    local contentHolder = Instance.new("Frame")
+    contentHolder.Name                   = "ContentHolder"
+    contentHolder.BackgroundTransparency = 1
+    contentHolder.BorderSizePixel        = 0
+    contentHolder.Position               = UDim2.new(0, 0, 0, 0)
+    contentHolder.Size                   = UDim2.new(1, 0, 1, 0)
+    contentHolder.Parent                 = rightPanel
+    self._contentHolder = contentHolder
+
+    -- Wide mode uses fixed height
+    self._wideHeight = FIXED_H
+    clip.Size        = UDim2.new(1, 0, 0, FIXED_H)
+    self._wrapper.Size = UDim2.new(0, WIDE_W, 0, 28 + FIXED_H)
+    self._contentHeight = FIXED_H
+end
+
+-- Attach a tab's button and content to the current shell
+function WizardLib:_attachTab(tabData)
+    tabData.btn.Parent     = self._tabList
+    tabData.content.Parent = self._contentHolder
+
+    if self._mode == "wide" then
+        -- In wide mode content fills the right panel fully
+        tabData.content.Size     = UDim2.new(1, 0, 1, 0)
+        tabData.content.Position = UDim2.new(0, 0, 0, 0)
+    else
+        tabData.content.Size     = UDim2.new(1, 0, 0, tabData.height)
+        tabData.content.Position = UDim2.new(0, 0, 0, 0)
+    end
 end
 
 function WizardLib:_openTab(tabData)
-    -- Hide all content frames
     for _, t in ipairs(self._tabs) do
         t.content.Visible      = false
-        t.btn.BackgroundColor3 = COLORS.bg
+        t.btn.BackgroundColor3 = (self._mode == "wide") and Color3.fromRGB(38,38,38) or COLORS.bg
         t.arrow.Text           = ">"
     end
     tabData.content.Visible      = true
     tabData.btn.BackgroundColor3 = COLORS.tabactive
     tabData.arrow.Text           = "-"
     self._activeTab              = tabData
-    self._contentHeight          = tabData.height
-    self._contentHolder.Size     = UDim2.new(1, 0, 0, tabData.height)
 
-    if self._open then
-        local h = self._tabHeight + tabData.height
-        self._clip.Size    = UDim2.new(1, 0, 0, h)
-        self._wrapper.Size = UDim2.new(0, 220, 0, 28 + h)
+    if self._mode == "compact" then
+        self._contentHeight      = tabData.height
+        self._contentHolder.Size = UDim2.new(1, 0, 0, tabData.height)
+        if self._open then
+            local h = self._tabHeight + tabData.height
+            self._clip.Size    = UDim2.new(1, 0, 0, h)
+            self._wrapper.Size = UDim2.new(0, COMPACT_W, 0, 28 + h)
+        end
     end
+    -- wide mode: clip size is fixed, nothing to update
 end
 
 function WizardLib:_collapse()
     self._open   = not self._open
-    local h      = self._tabHeight + self._contentHeight
     self._locked = true
+    local isWide = self._mode == "wide"
+    local W      = isWide and WIDE_W or COMPACT_W
+    local h      = isWide and self._wideHeight or (self._tabHeight + self._contentHeight)
 
     if self._open then
         self._toggleBtn.Text = "-"
         self._clip.Size      = UDim2.new(1, 0, 0, 0)
-        local t = makeTween(self._clip,    { Size = UDim2.new(1, 0, 0, h) },      TWEEN_OPEN)
-        makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28 + h) }, TWEEN_OPEN):Play()
+        local t = makeTween(self._clip,    { Size = UDim2.new(1, 0, 0, h) },       TWEEN_OPEN)
+        makeTween(self._wrapper, { Size = UDim2.new(0, W, 0, 28 + h) }, TWEEN_OPEN):Play()
         t:Play()
         t.Completed:Connect(function() self._locked = false end)
     else
         self._toggleBtn.Text = ">"
         local t = makeTween(self._clip,    { Size = UDim2.new(1, 0, 0, 0) },  TWEEN_CLOSE)
-        makeTween(self._wrapper, { Size = UDim2.new(0, 220, 0, 28) }, TWEEN_CLOSE):Play()
+        makeTween(self._wrapper, { Size = UDim2.new(0, W, 0, 28) }, TWEEN_CLOSE):Play()
         t:Play()
         t.Completed:Connect(function() self._locked = false end)
     end
@@ -279,7 +415,7 @@ function WizardLib:Tab(tabName)
 
     local tabBtn = Instance.new("TextButton")
     tabBtn.Name             = "Tab_" .. tabName
-    tabBtn.BackgroundColor3 = COLORS.bg
+    tabBtn.BackgroundColor3 = (self._mode == "wide") and Color3.fromRGB(38,38,38) or COLORS.bg
     tabBtn.BorderSizePixel  = 0
     tabBtn.Size             = UDim2.new(1, 0, 0, TAB_H)
     tabBtn.Text             = ""
@@ -291,8 +427,8 @@ function WizardLib:Tab(tabName)
     tabLabel.TextColor3     = COLORS.text
     tabLabel.TextSize       = 11
     tabLabel.Font           = Enum.Font.GothamBold
-    tabLabel.Position       = UDim2.new(0, 10, 0, 0)
-    tabLabel.Size           = UDim2.new(1, -30, 1, 0)
+    tabLabel.Position       = UDim2.new(0, 8, 0, 0)
+    tabLabel.Size           = UDim2.new(1, -24, 1, 0)
     tabLabel.TextXAlignment = Enum.TextXAlignment.Left
     tabLabel.Parent         = tabBtn
 
@@ -302,8 +438,8 @@ function WizardLib:Tab(tabName)
     arrow.TextColor3     = COLORS.muted
     arrow.TextSize       = 11
     arrow.Font           = Enum.Font.GothamBold
-    arrow.Position       = UDim2.new(1, -20, 0, 0)
-    arrow.Size           = UDim2.new(0, 16, 1, 0)
+    arrow.Position       = UDim2.new(1, -18, 0, 0)
+    arrow.Size           = UDim2.new(0, 14, 1, 0)
     arrow.TextXAlignment = Enum.TextXAlignment.Center
     arrow.Parent         = tabBtn
 
@@ -314,14 +450,17 @@ function WizardLib:Tab(tabName)
     div.Size             = UDim2.new(1, 0, 0, 1)
     div.Parent           = tabBtn
 
-    -- Content lives inside contentHolder, not clip directly
+    -- Content
     local content = Instance.new("Frame")
     content.Name                   = "Content_" .. tabName
     content.BackgroundTransparency = 1
     content.BorderSizePixel        = 0
     content.Position               = UDim2.new(0, 0, 0, 0)
-    content.Size                   = UDim2.new(1, 0, 0, 0)
+    content.Size                   = self._mode == "wide"
+        and UDim2.new(1, 0, 1, 0)
+        or  UDim2.new(1, 0, 0, 0)
     content.Visible                = false
+    content.ClipsDescendants       = true
     content.Parent                 = self._contentHolder
 
     local listLayout = Instance.new("UIListLayout")
@@ -343,6 +482,7 @@ function WizardLib:Tab(tabName)
         content = content,
         layout  = listLayout,
         height  = 0,
+        name    = tabName,
     }
     table.insert(self._tabs, tabData)
 
@@ -350,13 +490,15 @@ function WizardLib:Tab(tabName)
         if self_lib._locked then return end
         local h = listLayout.AbsoluteContentSize.Y + 16
         tabData.height = h
-        content.Size   = UDim2.new(1, 0, 0, h)
-        if self_lib._activeTab == tabData and self_lib._open then
-            self_lib._contentHeight          = h
-            self_lib._contentHolder.Size     = UDim2.new(1, 0, 0, h)
-            local total = self_lib._tabHeight + h
-            self_lib._clip.Size    = UDim2.new(1, 0, 0, total)
-            self_lib._wrapper.Size = UDim2.new(0, 220, 0, 28 + total)
+        if self_lib._mode == "compact" then
+            content.Size = UDim2.new(1, 0, 0, h)
+            if self_lib._activeTab == tabData and self_lib._open then
+                self_lib._contentHeight          = h
+                self_lib._contentHolder.Size     = UDim2.new(1, 0, 0, h)
+                local total = self_lib._tabHeight + h
+                self_lib._clip.Size    = UDim2.new(1, 0, 0, total)
+                self_lib._wrapper.Size = UDim2.new(0, COMPACT_W, 0, 28 + total)
+            end
         end
     end)
 
@@ -368,6 +510,7 @@ function WizardLib:Tab(tabName)
         self:_openTab(tabData)
     end
 
+    -- Tab element API
     local tabAPI = {}
 
     local function row(h)
@@ -465,7 +608,7 @@ function WizardLib:Tab(tabName)
         local fill = Instance.new("Frame")
         fill.BackgroundColor3 = Color3.fromRGB(140, 140, 140)
         fill.BorderSizePixel  = 0
-        fill.Size             = UDim2.new((val - min) / (max - min), 0, 1, 0)
+        fill.Size             = UDim2.new((val-min)/(max-min), 0, 1, 0)
         corner(fill, 2)
         fill.Parent = track
 
@@ -474,7 +617,7 @@ function WizardLib:Tab(tabName)
         knob.BorderSizePixel  = 0
         knob.Text             = ""
         knob.Size             = UDim2.new(0, 14, 0, 14)
-        knob.Position         = UDim2.new((val - min) / (max - min), -7, 0.5, -7)
+        knob.Position         = UDim2.new((val-min)/(max-min), -7, 0.5, -7)
         corner(knob, 7)
         knob.Parent = track
 
@@ -482,7 +625,7 @@ function WizardLib:Tab(tabName)
         local function setVal(input)
             local rel = math.clamp(
                 (input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-            val           = math.floor(min + (max - min) * rel)
+            val           = math.floor(min + (max-min) * rel)
             valL.Text     = tostring(val)
             fill.Size     = UDim2.new(rel, 0, 1, 0)
             knob.Position = UDim2.new(rel, -7, 0.5, -7)
