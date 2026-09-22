@@ -1,4 +1,4 @@
--- WizardLib.lua (v2.1 — scrolling, mobile friendly)
+-- WizardLib.lua (v2.2 — scroll fix, plain Frame content)
 
 local WizardLib = {}
 WizardLib.__index = WizardLib
@@ -26,7 +26,6 @@ local COMPACT_W   = 220
 local WIDE_W      = 420
 local WIDE_TAB    = 90
 local WIDE_H      = 260
--- Max height before compact mode starts scrolling
 local COMPACT_MAX = 300
 
 local function makeTween(obj, props, info)
@@ -229,30 +228,31 @@ function WizardLib:_buildCompactLayout()
         tabList.Size    = UDim2.new(1, 0, 0, self._tabHeight)
     end)
 
-    -- contentHolder is now a ScrollingFrame
+    -- Single ScrollingFrame holds all tab content frames
     local sf = Instance.new("ScrollingFrame")
-    sf.Name                          = "ContentHolder"
-    sf.BackgroundTransparency        = 1
-    sf.BorderSizePixel               = 0
-    sf.Size                          = UDim2.new(1, 0, 0, 0)
-    sf.CanvasSize                    = UDim2.new(0, 0, 0, 0)
-    sf.ScrollBarThickness            = 3
-    sf.ScrollBarImageColor3          = Color3.fromRGB(90, 90, 90)
-    sf.ScrollBarImageTransparency    = 0
-    sf.ScrollingDirection            = Enum.ScrollingDirection.Y
-    sf.ElasticBehavior               = Enum.ElasticBehavior.WhenScrollable
-    sf.LayoutOrder                   = 2
-    sf.ClipsDescendants              = true
-    sf.Parent                        = clip
+    sf.Name                       = "ContentHolder"
+    sf.BackgroundTransparency     = 1
+    sf.BorderSizePixel            = 0
+    sf.Size                       = UDim2.new(1, 0, 0, 0)
+    sf.CanvasSize                 = UDim2.new(0, 0, 0, 0)
+    sf.ScrollBarThickness         = 3
+    sf.ScrollBarImageColor3       = Color3.fromRGB(90, 90, 90)
+    sf.ScrollBarImageTransparency = 0
+    sf.ScrollingDirection         = Enum.ScrollingDirection.Y
+    sf.ElasticBehavior            = Enum.ElasticBehavior.WhenScrollable
+    sf.LayoutOrder                = 2
+    sf.ClipsDescendants           = true
+    sf.Parent                     = clip
     self._contentHolder = sf
 
     clipLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         if self._locked then return end
-        local rawH  = clipLayout.AbsoluteContentSize.Y
-        local clampH = math.min(rawH, self._tabHeight + COMPACT_MAX)
+        local rawH   = self._tabHeight + self._contentHeight
+        local clampH = math.min(self._contentHeight, COMPACT_MAX)
+        local total  = self._tabHeight + clampH
         if self._open then
-            clip.Size          = UDim2.new(1, 0, 0, clampH)
-            self._wrapper.Size = UDim2.new(0, COMPACT_W, 0, 28 + clampH)
+            clip.Size          = UDim2.new(1, 0, 0, total)
+            self._wrapper.Size = UDim2.new(0, COMPACT_W, 0, 28 + total)
         end
     end)
 end
@@ -273,7 +273,6 @@ function WizardLib:_buildWideLayout()
     ls.Thickness = 1
     ls.Parent    = leftPanel
 
-    -- Tab list as ScrollingFrame for many tabs
     local tabList = Instance.new("ScrollingFrame")
     tabList.Name                       = "TabList"
     tabList.BackgroundTransparency     = 1
@@ -296,7 +295,7 @@ function WizardLib:_buildWideLayout()
     self._tabListLayout = tabListLayout
 
     tabListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-        self._tabHeight   = tabListLayout.AbsoluteContentSize.Y
+        self._tabHeight    = tabListLayout.AbsoluteContentSize.Y
         tabList.CanvasSize = UDim2.new(0, 0, 0, self._tabHeight)
     end)
 
@@ -309,24 +308,23 @@ function WizardLib:_buildWideLayout()
     rightPanel.ClipsDescendants       = true
     rightPanel.Parent                 = clip
 
-    -- Right side is also a ScrollingFrame
     local sf = Instance.new("ScrollingFrame")
-    sf.Name                          = "ContentHolder"
-    sf.BackgroundTransparency        = 1
-    sf.BorderSizePixel               = 0
-    sf.Position                      = UDim2.new(0, 0, 0, 0)
-    sf.Size                          = UDim2.new(1, 0, 1, 0)
-    sf.CanvasSize                    = UDim2.new(0, 0, 0, 0)
-    sf.ScrollBarThickness            = 3
-    sf.ScrollBarImageColor3          = Color3.fromRGB(90, 90, 90)
-    sf.ScrollingDirection            = Enum.ScrollingDirection.Y
-    sf.ElasticBehavior               = Enum.ElasticBehavior.WhenScrollable
-    sf.ClipsDescendants              = true
-    sf.Parent                        = rightPanel
+    sf.Name                       = "ContentHolder"
+    sf.BackgroundTransparency     = 1
+    sf.BorderSizePixel            = 0
+    sf.Position                   = UDim2.new(0, 0, 0, 0)
+    sf.Size                       = UDim2.new(1, 0, 1, 0)
+    sf.CanvasSize                 = UDim2.new(0, 0, 0, 0)
+    sf.ScrollBarThickness         = 3
+    sf.ScrollBarImageColor3       = Color3.fromRGB(90, 90, 90)
+    sf.ScrollingDirection         = Enum.ScrollingDirection.Y
+    sf.ElasticBehavior            = Enum.ElasticBehavior.WhenScrollable
+    sf.ClipsDescendants           = true
+    sf.Parent                     = rightPanel
     self._contentHolder = sf
 
-    clip.Size          = UDim2.new(1, 0, 0, WIDE_H)
-    self._wrapper.Size = UDim2.new(0, WIDE_W, 0, 28 + WIDE_H)
+    clip.Size           = UDim2.new(1, 0, 0, WIDE_H)
+    self._wrapper.Size  = UDim2.new(0, WIDE_W, 0, 28 + WIDE_H)
     self._contentHeight = WIDE_H
 end
 
@@ -337,14 +335,9 @@ function WizardLib:_attachTab(tabData)
     tabData.btn.Parent           = self._tabList
 
     tabData.content.Visible  = false
-    if self._mode == "wide" then
-        tabData.content.Size     = UDim2.new(1, 0, 0, tabData.height)
-        tabData.content.Position = UDim2.new(0, 0, 0, 0)
-    else
-        tabData.content.Size     = UDim2.new(1, 0, 0, tabData.height)
-        tabData.content.Position = UDim2.new(0, 0, 0, 0)
-    end
-    tabData.content.Parent = self._contentHolder
+    tabData.content.Size     = UDim2.new(1, 0, 0, tabData.height)
+    tabData.content.Position = UDim2.new(0, 0, 0, 0)
+    tabData.content.Parent   = self._contentHolder
 end
 
 function WizardLib:_openTab(tabData)
@@ -359,17 +352,16 @@ function WizardLib:_openTab(tabData)
     tabData.arrow.Text           = "-"
     self._activeTab              = tabData
 
-    -- Update ScrollingFrame canvas to match content height
     self._contentHolder.CanvasSize = UDim2.new(0, 0, 0, tabData.height)
 
     if self._mode == "compact" then
-        self._contentHeight = tabData.height
-        local displayH      = math.min(tabData.height, COMPACT_MAX)
+        self._contentHeight      = tabData.height
+        local displayH           = math.min(tabData.height, COMPACT_MAX)
         self._contentHolder.Size = UDim2.new(1, 0, 0, displayH)
         if self._open then
-            local h = self._tabHeight + displayH
-            self._clip.Size    = UDim2.new(1, 0, 0, h)
-            self._wrapper.Size = UDim2.new(0, COMPACT_W, 0, 28 + h)
+            local total = self._tabHeight + displayH
+            self._clip.Size    = UDim2.new(1, 0, 0, total)
+            self._wrapper.Size = UDim2.new(0, COMPACT_W, 0, 28 + total)
         end
     end
 end
@@ -479,22 +471,16 @@ function WizardLib:Tab(tabName)
     div.Size             = UDim2.new(1, 0, 0, 1)
     div.Parent           = tabBtn
 
-    -- Content is a ScrollingFrame so it scrolls when elements overflow
-    local content = Instance.new("ScrollingFrame")
-    content.Name                       = "Content_" .. tabName
-    content.BackgroundTransparency     = 1
-    content.BorderSizePixel            = 0
-    content.Position                   = UDim2.new(0, 0, 0, 0)
-    content.Size                       = UDim2.new(1, 0, 0, 0)
-    content.CanvasSize                 = UDim2.new(0, 0, 0, 0)
-    content.ScrollBarThickness         = 3
-    content.ScrollBarImageColor3       = Color3.fromRGB(90, 90, 90)
-    content.ScrollBarImageTransparency = 0
-    content.ScrollingDirection         = Enum.ScrollingDirection.Y
-    content.ElasticBehavior            = Enum.ElasticBehavior.WhenScrollable
-    content.Visible                    = false
-    content.ClipsDescendants           = true
-    content.Parent                     = self._contentHolder
+    -- Plain Frame — ScrollingFrame holder does the scrolling
+    local content = Instance.new("Frame")
+    content.Name                   = "Content_" .. tabName
+    content.BackgroundTransparency = 1
+    content.BorderSizePixel        = 0
+    content.Position               = UDim2.new(0, 0, 0, 0)
+    content.Size                   = UDim2.new(1, 0, 0, 0)
+    content.Visible                = false
+    content.ClipsDescendants       = false
+    content.Parent                 = self._contentHolder
 
     local listLayout = Instance.new("UIListLayout")
     listLayout.Padding             = UDim.new(0, 3)
@@ -522,8 +508,8 @@ function WizardLib:Tab(tabName)
     listLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
         if self_lib._locked then return end
         local h = listLayout.AbsoluteContentSize.Y + 16
-        tabData.height         = h
-        content.CanvasSize     = UDim2.new(0, 0, 0, h)
+        tabData.height = h
+        content.Size   = UDim2.new(1, 0, 0, h)
 
         if self_lib._activeTab == tabData then
             self_lib._contentHolder.CanvasSize = UDim2.new(0, 0, 0, h)
@@ -814,10 +800,10 @@ function WizardLib:Tab(tabName)
         list.Parent = outer
 
         local ll = Instance.new("UIListLayout")
-        ll.Padding           = UDim.new(0, 0)
-        ll.FillDirection     = Enum.FillDirection.Vertical
+        ll.Padding             = UDim.new(0, 0)
+        ll.FillDirection       = Enum.FillDirection.Vertical
         ll.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        ll.Parent            = list
+        ll.Parent              = list
 
         for _, opt in ipairs(options) do
             local item = Instance.new("TextButton")
@@ -854,12 +840,12 @@ function WizardLib:Tab(tabName)
             end)
 
             item.MouseButton1Click:Connect(function()
-                selected      = opt
-                selL.Text     = opt
-                ddOpen        = false
-                chevron.Text  = "v"
+                selected     = opt
+                selL.Text    = opt
+                ddOpen       = false
+                chevron.Text = "v"
                 makeTween(list, { Size = UDim2.new(1, 0, 0, 0) }, TWEEN_CLOSE):Play()
-                outer.Size    = UDim2.new(1, 0, 0, HEAD_H)
+                outer.Size   = UDim2.new(1, 0, 0, HEAD_H)
                 if callback then callback(opt) end
             end)
         end
